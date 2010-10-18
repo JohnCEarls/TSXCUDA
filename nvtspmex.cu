@@ -1,6 +1,6 @@
 /*=================================================================
  *
- *  nvtst.c
+ *  nvtspmex.cu
  *  Author: Andrew Magis
  *  Calculate TSP scores on the GPU
  *  Inputs: Class 1 data, Class 2 data, N (size of cross-validation)
@@ -10,9 +10,16 @@
  *=================================================================*/
 
 #include <math.h>
-#include "mex.h"
+//#include "mex.h"
 #include <vector>
-
+#ifndef __NVTSP_H_
+#define __NVTSP_H_
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
 void DisplayDeviceProperties(int device) {
 
     cudaDeviceProp deviceProp;
@@ -102,8 +109,12 @@ __global__ void tspKernel(float *d_class1, float *d_class2, unsigned int n1, uns
 	vote[(blockIdx.x*blockDim.x + threadIdx.x)*m + (blockIdx.y*blockDim.y + threadIdx.y)] = ABSBINARYMACRO(class1_score-class2_score);
 
 }
+/**
 
-void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) { 
+If I am lucky this is the only bit I'm going to have to rewrite
+**/
+void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classSizes, std::vector<int> & nvec , std::vector<int> & I1LIST, std::vector<int> & I2LIST ){
+
 	
 	DisplayDeviceProperties(0);
 
@@ -114,7 +125,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
     cudaEventRecord(start_event, 0);
     cudaEventSynchronize(start_event);
 	float time_run;
-		
+	/**	
 	//Error check
 	if (nrhs != 3) {
 		mexErrMsgTxt("Three inputs required (class 1 ranks, class 2 ranks, N-fold cross-validation).");
@@ -122,6 +133,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	if (nlhs != 5) {
 		mexErrMsgTxt("Five outputs required (TSP primary scores, TSP secondary scores, lower bounds, upper bounds, vote)");
 	}
+   
     // The input must be a noncomplex single.
     if (mxGetClassID(prhs[0]) != mxSINGLE_CLASS || mxIsComplex(prhs[0])) {
         mexErrMsgTxt("Class1 Input must be a noncomplex single.");
@@ -129,21 +141,23 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	if (mxGetClassID(prhs[1]) != mxSINGLE_CLASS || mxIsComplex(prhs[1])) {
         mexErrMsgTxt("Class2 Input must be a noncomplex single.");
     }		
-	
+    **/	
 	//Get the size of cross-validation we want
 	double *cvn_temp = (double*)mxGetPr(prhs[2]);
-	unsigned int cvn = (unsigned int)(cvn_temp[0]);
+	unsigned int cvn = 5;//(unsigned int)(cvn_temp[0]);
 	printf("Size of cross-validation is is %u\n", cvn);
 
 	//m is the number of rows (genes)
 	//n is the number of chips (samples)
-	unsigned int m1 = mxGetM(prhs[0]);
-	unsigned int n1 = mxGetN(prhs[0]);
-	unsigned int m2 = mxGetM(prhs[1]);
-	unsigned int n2 = mxGetN(prhs[1]);
+	unsigned int m1 = dsSize;//mxGetM(prhs[0]);
+	unsigned int n1 = classSizes[0];//mxGetN(prhs[0]);
+	unsigned int m2 = dsSize;//mxGetM(prhs[1]);
+	unsigned int n2 = classSizes[0];//mxGetN(prhs[1]);
+    /**
 	if (m1 != m2) {
 		mexErrMsgTxt("Number of genes for class 1 != class 2\n");
-	}	
+	}
+    **/	
 		
 	//Create a padded m which is multiple of THREADS
 	unsigned int m;
@@ -155,68 +169,92 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	printf("Class1 Ranks: [%d, %d] Class2 Ranks: [%d, %d]\n", m1, n1, m2, n2);
 	printf("Thread Dimension: %d Padded length: %d\n", THREADS, m);
 
+    /**Five outputs required (TSP primary scores, TSP secondary scores, lower bounds, upper bounds, vote)
+    **/
 	// Create an mxArray for the output data - this is automatically zeroed out
+    //near as I can tell we are creating 5 ngenes x ngenes arrays, four floats and one int
+    float ** TSPPrimaryScores = new float*[m1];
+    float ** TSPSecondaryScores = new float*[m1];
+    float ** lower_bounds = new float*[m1];
+    float ** upper_bounds = new float*[m1];
+    int **  vote = new int*[m1];
+     for(int i=0; i<m1 ; i++){
+        TSPPrimaryScores[i] = new float[m1];
+        TSPSecondaryScores[i] = new float[m1];
+        lower_bounds[i] = new float[m1];
+        upper_bounds[i] = new float[m1];
+        vote[i] = new int[m1];
+        /**
+        Dont think this is necessary
+        for(int j = 0; j<m1; j++){
+            TSPPrimaryScores[i][j] = 0.0;
+            TSPSecondaryScores[i][j] = 0.0; 
+            lower_bounds[i][j] = 0.0;
+            upper_bounds[i][j] = 0.0;
+            vote[i][j] = 0;
+        }**/
+    } 
+    /**
 	plhs[0] = mxCreateNumericMatrix(m1, m1, mxSINGLE_CLASS, mxREAL);	
 	plhs[1] = mxCreateNumericMatrix(m1, m1, mxSINGLE_CLASS, mxREAL);
 	plhs[2] = mxCreateNumericMatrix(m1, m1, mxSINGLE_CLASS, mxREAL);	
 	plhs[3] = mxCreateNumericMatrix(m1, m1, mxSINGLE_CLASS, mxREAL);
 	plhs[4] = mxCreateNumericMatrix(m1, m1, mxINT32_CLASS, mxREAL);
-	
+	**/
 	unsigned long int class1_size = m*n1 * sizeof(float);
 	unsigned long int class2_size = m*n2 * sizeof(float);
 	unsigned long int result_size = m*m * sizeof(float);
 	
 	//Allocate space on the GPU to store the input data
 	float *d_class1, *d_class2;
-	if ( cudaMalloc( (void**)&d_class1, class1_size ) != cudaSuccess )
-       	    mexErrMsgTxt("Memory allocating failure on the GPU.");
-	if ( cudaMalloc( (void**)&d_class2, class2_size )  != cudaSuccess )
-            mexErrMsgTxt("Memory allocating failure on the GPU.");
+	if ( (cudaMalloc( (void**)&d_class1, class1_size ) != cudaSuccess ) ||  cudaMalloc( (void**)&d_class2, class2_size )  != cudaSuccess ){
+            cout << "Memory allocating failure on the GPU.";
+    }
 			
 	//Allocate space on the GPU to store the output data
 	float *d_s1, *d_s2, *d_s3, *d_s4, *d_s5;	
-    if ( cudaMalloc( (void**)&d_s1, result_size )  != cudaSuccess )
-			mexErrMsgTxt("Memory allocating failure on the GPU.");
-    if ( cudaMalloc( (void**)&d_s2, result_size )  != cudaSuccess )
-			mexErrMsgTxt("Memory allocating failure on the GPU.");
-    if ( cudaMalloc( (void**)&d_s3, result_size )  != cudaSuccess )
-			mexErrMsgTxt("Memory allocating failure on the GPU.");
-    if ( cudaMalloc( (void**)&d_s4, result_size )  != cudaSuccess )
-			mexErrMsgTxt("Memory allocating failure on the GPU.");
-    if ( cudaMalloc( (void**)&d_s5, result_size )  != cudaSuccess )
-			mexErrMsgTxt("Memory allocating failure on the GPU.");
+    if( ( cudaMalloc( (void**)&d_s1, result_size )  != cudaSuccess )
+    || ( cudaMalloc( (void**)&d_s2, result_size )  != cudaSuccess )
+    || ( cudaMalloc( (void**)&d_s3, result_size )  != cudaSuccess )
+    || ( cudaMalloc( (void**)&d_s4, result_size )  != cudaSuccess )
+    || ( cudaMalloc( (void**)&d_s5, result_size )  != cudaSuccess )){
+			cout << "Memory allocating failure on the GPU.";
+    }
 			
 	//Reallocate space for the data on the host with zeroed out padding
 	float *h_class1, *h_class2, *h_s1, *h_s2, *h_s3, *h_s4, *h_s5;
-	if (cudaMallocHost((void**)&h_class1, class1_size) != cudaSuccess) 
-		mexErrMsgTxt("Memory allocating failure on the host.");
-	if (cudaMallocHost((void**)&h_class2, class2_size) != cudaSuccess)
-		mexErrMsgTxt("Memory allocating failure on the host.");
-	if (cudaMallocHost((void**)&h_s1, result_size) != cudaSuccess) 
-		mexErrMsgTxt("Memory allocating failure on the host.");
-	if (cudaMallocHost((void**)&h_s2, result_size) != cudaSuccess) 
-		mexErrMsgTxt("Memory allocating failure on the host.");
-	if (cudaMallocHost((void**)&h_s3, result_size) != cudaSuccess) 
-		mexErrMsgTxt("Memory allocating failure on the host.");
-	if (cudaMallocHost((void**)&h_s4, result_size) != cudaSuccess) 
-		mexErrMsgTxt("Memory allocating failure on the host.");		
-	if (cudaMallocHost((void**)&h_s5, result_size) != cudaSuccess) 
+	if ((cudaMallocHost((void**)&h_class1, class1_size) != cudaSuccess) 
+	|| (cudaMallocHost((void**)&h_class2, class2_size) != cudaSuccess)
+	|| (cudaMallocHost((void**)&h_s1, result_size) != cudaSuccess) 
+	|| (cudaMallocHost((void**)&h_s2, result_size) != cudaSuccess) 
+	|| (cudaMallocHost((void**)&h_s3, result_size) != cudaSuccess) 
+	|| (cudaMallocHost((void**)&h_s4, result_size) != cudaSuccess) 
+	|| (cudaMallocHost((void**)&h_s5, result_size) != cudaSuccess) ){
 		mexErrMsgTxt("Memory allocating failure on the host.");	
+    }
 		
 	//Zero out the memory on the host
 	memset(h_class1, 0, class1_size);
 	memset(h_class2, 0, class2_size);
 	
 	//Copy over data to new padded array location on host
+    //k back to near as I can tell
+    //this appears to be copying the data into the GPU
+    //prob a good time to make our dataFloatArray
+    float * mtemp = float[data.size()];
+
+    for (int i = 0; i<data.size();i++){
+        mtemp[i] = (float)data.at(i);//might as well be explicit
+    }
 	float *temp = h_class1;
-	float *mtemp = (float*)mxGetData(prhs[0]);
+	//float *mtemp = (float*)mxGetData(prhs[0]);
 	for (int i = 0; i < n1; i++) {
 		memcpy(temp, mtemp, m1*sizeof(float));
 		mtemp += m1;
 		temp += m;
 	}	
 	temp = h_class2;
-	mtemp = (float*)mxGetData(prhs[1]);
+
 	for (int i = 0; i < n2; i++) {
 		memcpy(temp, mtemp, m1*sizeof(float));
 		mtemp += m1;
@@ -224,10 +262,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	}		
 							
 	//Copy data to the GPU
-	if (cudaMemcpy(d_class1, h_class1, class1_size, cudaMemcpyHostToDevice) != cudaSuccess)
-		mexErrMsgTxt("Error copying memory to the GPU.");
-	if (cudaMemcpy(d_class2, h_class2, class2_size, cudaMemcpyHostToDevice) != cudaSuccess)
-		mexErrMsgTxt("Error copying memory to the GPU.");
+	if ( (cudaMemcpy(d_class1, h_class1, class1_size, cudaMemcpyHostToDevice) != cudaSuccess) || (cudaMemcpy(d_class2, h_class2, class2_size, cudaMemcpyHostToDevice) != cudaSuccess)){
+		cout << "Error copying memory to the GPU.";
+    }
 		
 	//Set the dimension of the blocks and grids
 	dim3 dimBlock(THREADS, THREADS);
@@ -238,32 +275,29 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	cudaThreadSynchronize();
 		
 	//Copy the memory back
-	if (cudaMemcpy(h_s1, d_s1, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-		mexErrMsgTxt("Error copying memory from the GPU.");
-	if (cudaMemcpy(h_s2, d_s2, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-		mexErrMsgTxt("Error copying memory from the GPU.");
-	if (cudaMemcpy(h_s3, d_s3, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-		mexErrMsgTxt("Error copying memory from the GPU.");
-	if (cudaMemcpy(h_s4, d_s4, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-		mexErrMsgTxt("Error copying memory from the GPU.");		
-	if (cudaMemcpy(h_s5, d_s5, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-		mexErrMsgTxt("Error copying memory from the GPU.");	
+	if ((cudaMemcpy(h_s1, d_s1, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) ||
+	 (cudaMemcpy(h_s2, d_s2, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
+	|| (cudaMemcpy(h_s3, d_s3, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
+	|| (cudaMemcpy(h_s4, d_s4, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
+	|| (cudaMemcpy(h_s5, d_s5, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) )
+		cout << "Error copying memory from the GPU.";	
 		
 	float *gpu_output1 = h_s1, *gpu_output2 = h_s2, *gpu_output3 = h_s3, *gpu_output4 = h_s4, *gpu_output5 = h_s5;
-	float *matlab_output1 = (float*) mxGetData(plhs[0]);		
+
+/**	float *matlab_output1 = (float*) mxGetData(plhs[0]);		
 	float *matlab_output2 = (float*) mxGetData(plhs[1]);
 	float *matlab_output3 = (float*) mxGetData(plhs[2]);
 	float *matlab_output4 = (float*) mxGetData(plhs[3]);	
 	float *matlab_output5 = (float*) mxGetData(plhs[4]);
-	
+**/	
 	//Finally, copy the padded array data into the output matrix
 	for (int i = 0; i < m1; i++) {
-		memcpy(matlab_output1, gpu_output1, m1*sizeof(float));
-		memcpy(matlab_output2, gpu_output2, m1*sizeof(float));
-		memcpy(matlab_output3, gpu_output3, m1*sizeof(float));
-		memcpy(matlab_output4, gpu_output4, m1*sizeof(float));
-		memcpy(matlab_output5, gpu_output5, m1*sizeof(float));			
-		matlab_output1 += m1; matlab_output2 += m1; matlab_output3 += m1; matlab_output4 += m1; matlab_output5 += m1;
+		memcpy(TSPPrimaryScores, gpu_output1, m1*sizeof(float));
+		memcpy(TSPSecondaryScores, gpu_output2, m1*sizeof(float));
+		memcpy(lower_bounds, gpu_output3, m1*sizeof(float));
+		memcpy(upper_bounds, gpu_output4, m1*sizeof(float));
+		memcpy(vote, gpu_output5, m1*sizeof(float));			
+		TSPPrimaryScores += m1; TSPSecondaryScores += m1; lower_bounds += m1; upper_bounds += m1; vote += m1;
 		gpu_output1 += m; gpu_output2 += m; gpu_output3 += m; gpu_output4 += m; gpu_output5 += m;
 	}		
 		
@@ -293,5 +327,4 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray*prhs[]) {
 	cudaFreeHost(h_s5);
 		
 }
-
 
