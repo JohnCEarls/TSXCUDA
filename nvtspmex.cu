@@ -113,7 +113,7 @@ __global__ void tspKernel(float *d_class1, float *d_class2, unsigned int n1, uns
 
 If I am lucky this is the only bit I'm going to have to rewrite
 **/
-void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classSizes, std::vector<int> & nvec , std::vector<int> & I1LIST, std::vector<int> & I2LIST ){
+void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classSizes ){
 
 	
 	DisplayDeviceProperties(0);
@@ -173,6 +173,9 @@ void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classS
     **/
 	// Create an mxArray for the output data - this is automatically zeroed out
     //near as I can tell we are creating 5 ngenes x ngenes arrays, four floats and one int
+    /**
+    May be able to get away with using vectors
+    **/
     float ** TSPPrimaryScores = new float*[m1];
     float ** TSPSecondaryScores = new float*[m1];
     float ** lower_bounds = new float*[m1];
@@ -241,6 +244,7 @@ void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classS
     //k back to near as I can tell
     //this appears to be copying the data into the GPU
     //prob a good time to make our dataFloatArray
+    //may not have to do this.
     float * mtemp = float[data.size()];
 
     for (int i = 0; i<data.size();i++){
@@ -300,7 +304,14 @@ void nvwrapper(std::vector<double> & data, int dsSize, std::vector<int> & classS
 		TSPPrimaryScores += m1; TSPSecondaryScores += m1; lower_bounds += m1; upper_bounds += m1; vote += m1;
 		gpu_output1 += m; gpu_output2 += m; gpu_output3 += m; gpu_output4 += m; gpu_output5 += m;
 	}		
-		
+	
+    /**
+    TODO
+    Memory cleanup and pushing data into output
+    
+
+    **/
+	
 	cudaEventRecord(stop_event, 0);
 	cudaEventSynchronize(stop_event); // block until the event is actually recorded
 	cudaEventElapsedTime(&time_run, start_event, stop_event);
