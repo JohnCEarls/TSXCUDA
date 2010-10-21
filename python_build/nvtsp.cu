@@ -35,7 +35,12 @@ void DisplayDeviceProperties(int device) {
 		printf("Device Name\t\t\t\t%s\n", deviceProp.name);
 		printf("Total Global Memory\t\t\t%ld KB\n",deviceProp.totalGlobalMem / 1024);
 		printf("Maximum threads per block\t\t%d\n", deviceProp.maxThreadsPerBlock);
-		
+		printf("Can map to host memory\t\t%d\n", deviceProp.canMapHostMemory);
+	    printf("Number processors\t\t%d\n", deviceProp.multiProcessorCount);
+	    printf("Compute Mode\t\t%d\n", deviceProp.computeMode);
+        printf("Shared Memory per Block\t\t%d\n", deviceProp.sharedMemPerBlock/1024);
+        printf("Max Grid Size[0]\t\t%d\n", deviceProp.maxGridSize[0]);	
+        printf("Timeout \t\t%d\n", deviceProp.kernelExecTimeoutEnabled);  	
     } else {
         printf("\n%s", cudaGetErrorString(cudaGetLastError()));
     }
@@ -117,23 +122,11 @@ __global__ void tspKernel(float *d_class1, float *d_class2, unsigned int n1, uns
 
 If I am lucky this is the only bit I'm going to have to rewrite
 **/
-void nvwrapper( std::vector<double> & data1, int dsSize1, std::vector<int> & classSizes1 ){
-    std::vector<double> data = data1;
-    int dsSize = dsSize1;
-    std::vector<int> classSizes = classSizes1;
-	
-	//DisplayDeviceProperties(0);
+void nvwrapper( std::vector<double> & data, int dsSize, std::vector<int> & classSizes){
 
-/**	//Time the execution of this function
-	cudaEvent_t start_event, stop_event;
-	cudaEventCreate(&start_event);
-    cudaEventCreate(&stop_event);
-    cudaEventRecord(start_event, 0);
-    cudaEventSynchronize(start_event);
-    float time_run;**/
-    // gonna have to pass this in as a parameter, but not interested in doing that  the moment.
+    size_t f_size = sizeof(float);
+   // gonna have to pass this in as a parameter, but not interested in doing that  the moment.
 	unsigned int cvn = 5;//(unsigned int)(cvn_temp[0]);
-	printf("Size of cross-validation is is %u\n", cvn);
 
 	//m is the number of rows (genes)
 	//n is the number of chips (samples)
@@ -149,207 +142,169 @@ void nvwrapper( std::vector<double> & data1, int dsSize1, std::vector<int> & cla
 	} else {
 		m = ((int)(m1 / THREADS) + 1) * THREADS;
 	}
-	printf("Class1 Ranks: [%d, %d] Class2 Ranks: [%d, %d]\n", m1, n1, m2, n2);
-	printf("Thread Dimension: %d Padded length: %d\n", THREADS, m);
 
     /**Five outputs required (TSP primary scores, TSP secondary scores, lower bounds, upper bounds, vote)
     **/
-	// Create an mxArray for the output data - this is automatically zeroed out
-    //near as I can tell we are creating 5 ngenes x ngenes arrays, four floats and one int
-    /**
-    May be able to get away with using vectors
-    **/
 
-    float TSPPrimaryScores[m1][m1];// = new float*[m1];
-    float TSPSecondaryScores[m1][m1];// = new float*[m1];
-    float lowerbounds[m1][m1];// float*[m1];
-    float upperbounds[m1][m1];// = new float*[m1];
-    float vote[m1][m1];// = new float*[m1];
-	
-    unsigned long int class1_size = m*n1 * sizeof(float);
-	unsigned long int class2_size = m*n2 * sizeof(float);
-	unsigned long int result_size = m*m * sizeof(float);
-	
-	//Allocate space on the GPU to store the input data
-	float *d_class1, *d_class2;
-    cudaMalloc( (void**)&d_class1, class1_size );
-    cudaMalloc( (void**)&d_class2, class2_size ); 
-             printf("Memory allocating failure on the GPU.");
-			
-	//Allocate space on the GPU to store the output data
-	float *d_s1, *d_s2, *d_s3, *d_s4, *d_s5;
-    //debugging
-    float d_test = 1.0;
-    d_s1 = d_s2 = d_s3 = d_s4 = d_s5 = &d_test;	
     
-    if( ( cudaMalloc( (void**)&d_s1, result_size )  != cudaSuccess )
-    || ( cudaMalloc( (void**)&d_s2, result_size )  != cudaSuccess )
-    || ( cudaMalloc( (void**)&d_s3, result_size )  != cudaSuccess )
-    || ( cudaMalloc( (void**)&d_s4, result_size )  != cudaSuccess )
-    || ( cudaMalloc( (void**)&d_s5, result_size )  != cudaSuccess )){
-			cout << "Memory allocating failure on the GPU." << endl;
-            if(d_s1 == &d_test){
-                cout << "failed on";
-                cout << __LINE__ << endl;
-            }
-            if(d_s2 == &d_test){
-                cout << "failed on";
-                cout << __LINE__ << endl;
-            }if(d_s3 == &d_test){
-                cout << "failed on";
-                cout << __LINE__ << endl;
-            }if(d_s4 == &d_test){
-                cout << "failed on";
-                cout << __LINE__ << endl;
-            }if(d_s5 == &d_test){
-                cout << "failed on";
-                cout << __LINE__ << endl;
-            }
+    //build_output_containers
+    float ** TSPPrimaryScores, ** TSPSecondaryScores,** lowerbounds,** upperbounds, ** vote;
+    float ** help_allocation[5];
+   for(int i=0;i<5;i++){
+        help_allocation[i] = new float*[m1];
+        for(int j=0;j<m1;j++){
+            help_allocation[i][j] = new float[m1];
+        }
     }
-			
-	//Reallocate space for the data on the host with zeroed out padding
-	float *h_class1, *h_class2, *h_s1, *h_s2, *h_s3, *h_s4, *h_s5;
-	if ((cudaMallocHost((void**)&h_class1, class1_size) != cudaSuccess) 
-	|| (cudaMallocHost((void**)&h_class2, class2_size) != cudaSuccess)
-	|| (cudaMallocHost((void**)&h_s1, result_size) != cudaSuccess) 
-	|| (cudaMallocHost((void**)&h_s2, result_size) != cudaSuccess) 
-	|| (cudaMallocHost((void**)&h_s3, result_size) != cudaSuccess) 
-	|| (cudaMallocHost((void**)&h_s4, result_size) != cudaSuccess) 
-	|| (cudaMallocHost((void**)&h_s5, result_size) != cudaSuccess) ){
-	    cout <<	"Memory allocating failure on the host." << endl;	
+    TSPPrimaryScores = help_allocation[0];
+    TSPSecondaryScores=help_allocation[1];
+    lowerbounds=help_allocation[2];
+    upperbounds=help_allocation[3];
+    vote=help_allocation[4];
+ 
+    int gpu_mem;	
+    //the size our vectors 
+    unsigned long int class_size[2] = {m*n1*f_size, m*n2*f_size};
+	unsigned long int result_size = m*m * f_size;
+
+    //sum of gpu memory we need
+    unsigned long int necessary_gpu_memory = class_size[0] + class_size[1] + (5*result_size);
+    //check  available memory
+    availableMemory(0, necessary_gpu_memory);
+
+    //Allocate space on the GPU to store the input data
+    float * d_class[2];
+    for(int i=0;i<2;i++){
+        if( cudaMalloc( (void**)&d_class[i], class_size[i] ) != cudaSuccess){
+            cout << "Memory allocating failure on GPU" << endl;
+            exit(1);
+        }
     }
-		
-	//Zero out the memory on the host
-	memset(h_class1, 0, class1_size);
-	memset(h_class2, 0, class2_size);
-	//Copy over data to new padded array location on host
-    //k back to near as I can tell
-    //this appears to be copying the data into the GPU
-    //prob a good time to make our dataFloatArray
-    //may not have to do this if I make the double vector a float vector.
-    float mtemp_trough[data.size()];
-    for (int i = 0; i<data.size();i++){
-               mtemp_trough[i] = (float)data.at(i);
-   }
-    float *mtemp = mtemp_trough;
-	float *temp = h_class1;
-	for (int i = 0; i < n1; i++) {
-		memcpy(temp, mtemp, m1*sizeof(float));
-		mtemp += m1;
-		temp += m;
-	}	
-	temp = h_class2;
-    cout << __LINE__ << endl;
-	for (int i = 0; i < n2; i++) {
-		memcpy(temp, mtemp, m1*sizeof(float));
-		mtemp += m1;
-		temp += m;
-	}		
-							
+
+    //Allocate space on the GPU to store the output data
+	float * d_s[5];
+    for(int i=0;i<5;i++){
+        if( cudaMalloc( (void**)&d_s[i], result_size ) != cudaSuccess){
+            cout << "Memory allocating failure on GPU" << endl;
+            exit(1);
+        }
+
+    } 
+   
+
+    //Allocate space on the host to store the input data
+    float * h_class[2];
+    int data_i = 0;
+    for(int i=0;i<2;i++){
+        if(cudaMallocHost((void**)&h_class[i], class_size[i] ) != cudaSuccess){
+            cout << "Memory allocating failure on HOST-input" << endl;
+            exit(1);
+        }
+        //where data aligns assign data, where padding assign zero
+        int h_class_elements = class_size[i]/f_size;
+        for(int pad_i=0; pad_i < h_class_elements; pad_i++){
+            if(pad_i % m < m1){
+                if( data_i >= data.size()){
+                    cout << data_i <<endl;
+                    cout << pad_i << endl;
+                    cout << m1 << endl;
+                    cout << m << endl;
+                    cout << class_size[i];
+                }
+                h_class[i][pad_i] = (float)data.at( data_i);
+                
+                data_i++;
+            } else {
+                h_class[i][pad_i] = 0.0;
+            }
+        }
+    }
+
+    //Allocate space on the host to store the output data
+	float * h_s[5];
+    for(int i=0;i<5;i++){
+        if( cudaMallocHost( (void**)&h_s[i], result_size ) != cudaSuccess){
+            cout << "Memory allocating failure on HOST-output" << endl;
+            exit(1);
+        }
+
+    } 
+						
 	//Copy data to the GPU
-	if ( (cudaMemcpy(d_class1, h_class1, class1_size, cudaMemcpyHostToDevice) != cudaSuccess) || (cudaMemcpy(d_class2, h_class2, class2_size, cudaMemcpyHostToDevice) != cudaSuccess)){
-		cout << "Error copying memory to the GPU.";
-    }
-		
+    for(int i=0;i<2;i++){
+	    if ( (cudaMemcpy(d_class[i], h_class[i], class_size[i], cudaMemcpyHostToDevice) != cudaSuccess)){
+    		cout << "Error copying data to the GPU." << endl;
+            exit(1);
+        }
+	}	
 	//Set the dimension of the blocks and grids
 	dim3 dimBlock(THREADS, THREADS);
 	dim3 dimGrid(m/THREADS, m/THREADS);
-    cout << __LINE__ << endl;
-	
-	printf("Scheduling [%d %d] threads in [%d %d] blocks\n", THREADS, THREADS, m/THREADS, m/THREADS);
-	//tspKernel<<<dimGrid, dimBlock>>>(d_class1, d_class2, n1, n2, m, cvn, d_s1, d_s2, d_s3, d_s4, (int*)d_s5);
-	cudaThreadSynchronize();
-    cout << __LINE__ << endl;
+    //here we go	
+	tspKernel<<<dimGrid, dimBlock>>>(d_class[0], d_class[1], n1, n2, m, cvn, d_s[0], d_s[1], d_s[2], d_s[3], (int*)d_s[4]);
+	//wait for it
+    cudaThreadSynchronize();
 		
 	//Copy the memory back
-	if ((cudaMemcpy(h_s1, d_s1, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) ||
-	 (cudaMemcpy(h_s2, d_s2, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-	|| (cudaMemcpy(h_s3, d_s3, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-	|| (cudaMemcpy(h_s4, d_s4, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) 
-	|| (cudaMemcpy(h_s5, d_s5, result_size, cudaMemcpyDeviceToHost) != cudaSuccess) )
-		cout << "Error copying memory from the GPU.";	
-		
-	float *gpu_output1 = h_s1, *gpu_output2 = h_s2, *gpu_output3 = h_s3, *gpu_output4 = h_s4, *gpu_output5 = h_s5;
-    if (sizeof(float) == sizeof(int)){
-        cout << sizeof(float);
-        cout << "float is equal to int" << endl;
-    } else {
-        cout << "float neq int"<<endl;
+    for(int i = 0; i<5;i++){
+	    if (cudaMemcpy(h_s[i], d_s[i], result_size, cudaMemcpyDeviceToHost) != cudaSuccess){
+		    cout << "Error copying data from the GPU.";	
+            exit(0);
+        }
     }
-    /**
+		
 	//Finally, copy the padded array data into the output matrix
-	for (int i = 0; i < m1; i++) {
-		memcpy(TSPPrimaryScores, gpu_output1, m1*sizeof(float));
-		memcpy(TSPSecondaryScores, gpu_output2, m1*sizeof(float));
-		memcpy(lower_bounds, gpu_output3, m1*sizeof(float));
-		memcpy(upper_bounds, gpu_output4, m1*sizeof(float));
-		memcpy(vote, gpu_output5, m1*sizeof(float));			
-		TSPPrimaryScores += m1; TSPSecondaryScores += m1; lower_bounds += m1; upper_bounds += m1; vote += m1;
-		gpu_output1 += m; gpu_output2 += m; gpu_output3 += m; gpu_output4 += m; gpu_output5 += m;
-	}**/		
+    for (int help_i = 0; help_i < 5; help_i++){ 
+        float ** out = help_allocation[help_i]; 
+        float * padded = h_s[help_i];
+        for (int i = 0; i < m1; i++) {
+            memcpy(out[i], padded, m1*sizeof(float));
+            padded += m;        
+        }
+    }
 	
-    /**
-    TODO
-    Memory cleanup and pushing data into output
-    
-
-    **/
-	/**
-	cudaEventRecord(stop_event, 0);
-	cudaEventSynchronize(stop_event); // block until the event is actually recorded
-	cudaEventElapsedTime(&time_run, start_event, stop_event);
-	printf("Finished running nvTSP in %.6f seconds\n", time_run / 1000.0);
-	cudaEventRecord(start_event, 0);
-    cudaEventSynchronize(start_event);	
-	**/
-	//Clear up memory on the device
-	cudaFree(d_class1);
-	cudaFree(d_class2);
-	cudaFree(d_s1); 
-	cudaFree(d_s2);
-	cudaFree(d_s3);
-	cudaFree(d_s4);
-	cudaFree(d_s5);
-    /**
+    //Clear up memory on the device
+    for(int i=0;i<5;i++){
+	    if(i<2) cudaFree(d_class[i]);
+	    cudaFree(d_s[i]); 
+    }
 	//Clear up memory on the host
-	cudaFreeHost(h_class1);
-	cudaFreeHost(h_class2);
-	cudaFreeHost(h_s1); 
-	cudaFreeHost(h_s2);
-	cudaFreeHost(h_s3);
-	cudaFreeHost(h_s4);	
-	cudaFreeHost(h_s5);**/
-    cudaThreadSynchronize();
-   
+    for(int i=0;i<5;i++){
+	    if(i<2) cudaFree(h_class[i]);
+	    cudaFree(h_s[i]); 
+    }
 
-    cout << __LINE__ << endl;
-/**    for(int i=0; i<m1 ; i++){
-        delete [] TSPPrimaryScores[i];
-        delete [] TSPSecondaryScores[i];
-        delete [] lower_bounds[i];
-        delete [] upper_bounds[i];
-        delete [] vote[i];
-   }
-        delete [] TSPPrimaryScores;
-        delete [] TSPSecondaryScores;
-        delete [] lower_bounds;
-        delete [] upper_bounds;
-        delete [] vote;
-        d_class1 = d_class2 = d_s1 = d_s2 = d_s3 = d_s4 = d_s5 =
-h_class1 = 
-h_class2 = 
-h_s1 = 
-h_s2 = 
-h_s3 = 
-h_s4 = 
-h_s5= NULL;
-        TSPPrimaryScores = 
-        TSPSecondaryScores= 
-        lower_bounds= 
-        upper_bounds= 
-        vote = NULL;
-**/
-    cudaThreadExit();
-  
+    //TEMP*********************************************
+    //just cleanup memory for now, worry about passing back later
+    for(int i=0;i<5;i++){
+        for(int j=0;j<m1;j++){
+            delete [] help_allocation[i][j];
+        }
+        delete [] help_allocation[i];
+    }
+ 
 }
 
+/**
+returns the number of bytes of memory available on dev.
+FYI, if you only have 1 gpu dev is just 0
+**/
+void availableMemory(int dev, unsigned long int necessary_gpu_memory){
+
+
+    size_t available_gpu_memory, total_gpu_memory;
+    CUcontext ctx;
+    cuInit(dev);
+
+    cuCtxCreate(&ctx, 0, dev);
+    cuMemGetInfo(&available_gpu_memory, &total_gpu_memory);
+    cuCtxDetach(ctx);
+    if(necessary_gpu_memory >available_gpu_memory 	){
+        cout << "not enough memory to run this calculation"<<endl;
+        cout << "Necessary: ";
+        cout << necessary_gpu_memory<<endl;
+        cout << "Available: ";
+        cout << available_gpu_memory<<endl;
+        exit(1);
+    }
+}

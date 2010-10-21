@@ -1,9 +1,18 @@
 #include "nvtsp.cuh"
 #include <vector>
+#include <iostream>
+#include <stdlib.h>
+using std::cout;
+using std::endl;
 using std::vector;
 
-int main(){
-    int nGenes = 100;
+int main(int argc, char * argv[]){
+    int num;
+    for(int i=1; i<argc; i++){
+        num = atoi(argv[i]);
+        cout << num << endl;
+    }
+    int nGenes = num;
     int class1 = 10;
     int class2 = 10;
     vector<double> data(nGenes*class1+nGenes*class2);
